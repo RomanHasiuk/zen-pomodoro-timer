@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# User-specific files
+all_code.txt
+all_code-1.txt
+all_code-2.txt
+all_code-3.txt
+all_code-4.txt
