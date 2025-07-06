@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { type PomodoroSettings } from './useSettings';
-import { useAudio, type AudioType } from './useAudio';
+import { useAudio } from './useAudio';
 
 export interface TimerState {
   currentTime: number;
