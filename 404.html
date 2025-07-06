@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting...</title>
+    <script>
+      // Отримуємо базовий шлях з URL.
+      const pathSegments = window.location.pathname.split('/');
+      const repoName = pathSegments[1];
+      const basePath = `/${repoName}`;
+
+      window.location.replace(`${basePath}/`);
+    </script>
+  </head>
+  <body></body>
+</html>
