@@ -6,7 +6,7 @@ import { SettingsProvider } from './contexts/SettingsContext.tsx';
 function App() {
   return (
     <SettingsProvider>
-      <BrowserRouter>
+      <BrowserRouter basename="/zen-pomodoro-timer/">
         <Routes>
           <Route path="/" element={<TimerPage />} />
           <Route path="/fullscreen-timer" element={<FullscreenPage />} />
