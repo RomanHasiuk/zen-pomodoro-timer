@@ -14,17 +14,20 @@ export type AudioType =
 
 export const useAudio = (volume: number) => {
   // Use useMemo to create the Audio objects only once.
+  // Отримуємо базовий URL, який Vite автоматично вставляє під час збірки
+  const baseUrl = import.meta.env.BASE_URL; // Це буде '/zen-pomodoro-timer/'
+
   const audioMap = useMemo(() => ({
-    workStart: new Audio('/sounds/work_start.mp3'),
-    restStart: new Audio('/sounds/rest_start.mp3'),
-    longBreak: new Audio('/sounds/long_break.mp3'),
-    complete: new Audio('/sounds/finish.mp3'),
-    startup: new Audio('/sounds/startup.mp3'),
-    workWarning: new Audio('/sounds/work_warning.mp3'),
-    restWarning: new Audio('/sounds/rest_warning.mp3'),
-    pause: new Audio('/sounds/pause.mp3'),
-    unpause: new Audio('/sounds/unpause.mp3'),
-  }), []);
+    workStart: new Audio(`${baseUrl}sounds/work_start.mp3`), // Використовуємо baseUrl
+    restStart: new Audio(`${baseUrl}sounds/rest_start.mp3`),
+    longBreak: new Audio(`${baseUrl}sounds/long_break.mp3`),
+    complete: new Audio(`${baseUrl}sounds/finish.mp3`),
+    startup: new Audio(`${baseUrl}sounds/startup.mp3`),
+    workWarning: new Audio(`${baseUrl}sounds/work_warning.mp3`),
+    restWarning: new Audio(`${baseUrl}sounds/rest_warning.mp3`),
+    pause: new Audio(`${baseUrl}sounds/pause.mp3`),
+    unpause: new Audio(`${baseUrl}sounds/unpause.mp3`),
+  }), [baseUrl]); // Додай baseUrl до залежностей useMemo
 
   // Effect to update the volume on all audio elements whenever it changes
   useEffect(() => {
