@@ -1,6 +1,10 @@
+// src/hooks/useTimer.ts
+
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { type PomodoroSettings } from './useSettings';
+import { type PomodoroSettings } from '../hooks/useSettings'; // Перевірте шлях
 import { useAudio } from './useAudio';
+import { useNotifications } from './useNotifications';
+import TimerWorker from '../worker?worker'; // Перевірте шлях до worker.ts
 
 export interface TimerState {
   currentTime: number;
@@ -14,18 +18,19 @@ export interface TimerState {
 
 export const useTimer = (settings: PomodoroSettings, initialState?: Partial<TimerState>) => {
   const { playNotificationSound, stopAndResetAllSounds } = useAudio(settings.volume);
+  const { sendNotification, requestPermission, permission } = useNotifications();
+  const workerRef = useRef<Worker | null>(null);
 
-  const [isRunning, setIsRunning] = useState(initialState?.isRunning ?? false);
-  const [currentTime, setCurrentTime] = useState(initialState?.currentTime ?? settings.workTime * 60 + settings.workSeconds);
-  const [currentPhase, setCurrentPhase] = useState<'work' | 'rest' | 'longBreak'>(initialState?.currentPhase ?? 'work');
-  const [currentCycle, setCurrentCycle] = useState(initialState?.currentCycle ?? 1);
-  const [currentSet, setCurrentSet] = useState(initialState?.currentSet ?? 1);
-  const [isFinished, setIsFinished] = useState(initialState?.isFinished ?? false);
-  const [totalElapsedSeconds, setTotalElapsedSeconds] = useState(initialState?.totalElapsedSeconds ?? 0);
-
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+  const [timerState, setTimerState] = useState<TimerState>(() => ({
+    currentTime: settings.workTime * 60 + settings.workSeconds,
+    currentPhase: 'work',
+    currentCycle: 1,
+    currentSet: 1,
+    isRunning: false,
+    isFinished: false,
+    totalElapsedSeconds: 0,
+    ...initialState,
+  }));
 
   const calculateInitialTotalTime = useCallback(() => {
     const workSec = settings.workTime * 60 + settings.workSeconds;
@@ -53,117 +58,102 @@ export const useTimer = (settings: PomodoroSettings, initialState?: Partial<Time
     setInitialTotalSessionTime(calculateInitialTotalTime());
   }, [calculateInitialTotalTime]);
 
-  const handlePhaseComplete = useCallback(() => {
-    if (isFinished) return; // Do nothing if the session is already finished
-    if (currentPhase === 'work') {
-      if (currentCycle === settings.workCycles && currentSet === settings.totalSets) {
-        setIsRunning(false);
-        playNotificationSound('complete');
-        setIsFinished(true);
-      } else if (currentCycle < settings.workCycles) {
-        setCurrentPhase('rest');
-        setCurrentTime(settings.restTime * 60 + settings.restSeconds);
-        playNotificationSound('restStart');
-      } else {
-        setCurrentPhase('longBreak');
-        setCurrentTime(settings.longBreakTime * 60 + settings.longBreakSeconds);
-        playNotificationSound('longBreak');
-      }
-    } else if (currentPhase === 'rest') {
-      // Next work cycle / Наступний робочий цикл
-      setCurrentCycle((prev) => prev + 1);
-      setCurrentPhase('work');
-      setCurrentTime(settings.workTime * 60 + settings.workSeconds);
-      playNotificationSound('workStart');
-    } else if (currentPhase === 'longBreak') {
-      if (currentSet < settings.totalSets) {
-        // Next set / Наступний сет
-        setCurrentSet((prev) => prev + 1);
-        setCurrentCycle(1);
-        setCurrentPhase('work');
-        setCurrentTime(settings.workTime * 60 + settings.workSeconds);
-        playNotificationSound('workStart');
-      } else {
-        setIsRunning(false);
-        playNotificationSound('complete');
-        setIsFinished(true);
-      }
-    }
-  }, [currentPhase, currentCycle, currentSet, settings, playNotificationSound]);
 
   useEffect(() => {
-    clearInterval(intervalRef.current!);
-    clearTimeout(timeoutRef.current!);
+    const worker = new TimerWorker();
+    workerRef.current = worker;
 
-    if (isRunning && currentTime > 0) {
-      intervalRef.current = setInterval(() => {
-        setCurrentTime((prev) => {
-          const newTime = prev - 1;
-          setTotalElapsedSeconds((prevTotal) => prevTotal + 1);
+    // Відправляємо налаштування одразу при ініціалізації воркера
+    worker.postMessage({ command: 'init', settings, initialState });
 
-          const WARNING_THRESHOLD_SECONDS = 5;
-          if (newTime === WARNING_THRESHOLD_SECONDS && newTime > 0) {
-            playNotificationSound(currentPhase === 'work' ? 'workWarning' : 'restWarning');
-          }
-          return newTime;
-        });
-      }, 1000);
-    } else if (currentTime === 0) {
-      handlePhaseComplete();
-    }
+    worker.onmessage = (e: MessageEvent) => {
+      const { type, state, sound, title, options } = e.data; // Отримуємо також title та options для сповіщень
+
+      if (type === 'update') {
+        // Не порівнюємо oldPhase тут, оскільки воркер сам відправляє 'notify' коли фаза змінюється
+        setTimerState(state);
+      } else if (type === 'playSound') {
+        playNotificationSound(sound);
+      } else if (type === 'notify') { // Обробка нового типу повідомлення для сповіщень
+        sendNotification(title, options);
+      }
+    };
 
     return () => {
-      clearInterval(intervalRef.current!);
-      clearTimeout(timeoutRef.current!);
+      worker.terminate();
     };
-  }, [isRunning, currentTime, handlePhaseComplete, playNotificationSound, currentPhase]);
+  }, [settings, initialState, playNotificationSound, sendNotification]); // Додано sendNotification в залежності
 
   const toggleTimer = () => {
-    if (!isRunning) {
-      const isInitialWorkStart =
-        currentPhase === 'work' &&
-        currentCycle === 1 &&
-        currentSet === 1 &&
-        currentTime === settings.workTime * 60 + settings.workSeconds;
-
-      playNotificationSound(isInitialWorkStart ? 'startup' : 'unpause');
-
-      timeoutRef.current = setTimeout(() => {
-        setIsRunning(true);
-      }, 500);
+    if (permission === 'default') {
+      requestPermission().then(newPermission => {
+        if (newPermission === 'granted') {
+          // Якщо дозвіл надано, тоді запускаємо/зупиняємо таймер
+          if (timerState.isRunning) {
+            workerRef.current?.postMessage({ command: 'stop' });
+            playNotificationSound('pause');
+          } else {
+            const isInitialWorkStart =
+              timerState.currentPhase === 'work' &&
+              timerState.currentCycle === 1 &&
+              timerState.currentSet === 1 &&
+              timerState.currentTime === settings.workTime * 60 + settings.workSeconds;
+            playNotificationSound(isInitialWorkStart ? 'startup' : 'unpause');
+            setTimeout(() => {
+              workerRef.current?.postMessage({ command: 'start', settings }); // Передаємо settings при старті
+            }, 500);
+          }
+        }
+      });
+    } else if (permission === 'granted') {
+      // Якщо дозвіл вже надано, просто запускаємо/зупиняємо таймер
+      if (timerState.isRunning) {
+        workerRef.current?.postMessage({ command: 'stop' });
+        playNotificationSound('pause');
+      } else {
+        const isInitialWorkStart =
+          timerState.currentPhase === 'work' &&
+          timerState.currentCycle === 1 &&
+          timerState.currentSet === 1 &&
+          timerState.currentTime === settings.workTime * 60 + settings.workSeconds;
+        playNotificationSound(isInitialWorkStart ? 'startup' : 'unpause');
+        setTimeout(() => {
+          workerRef.current?.postMessage({ command: 'start', settings }); // Передаємо settings при старті
+        }, 500);
+      }
     } else {
-      setIsRunning(false);
-      playNotificationSound('pause');
-      clearTimeout(timeoutRef.current!);
+        // Якщо дозвіл відхилено, повідомте користувача або заблокуйте функціонал
+        console.warn('Сповіщення заборонено. Таймер буде працювати без сповіщень.');
+        // Продовжуємо логіку таймера без сповіщень
+        if (timerState.isRunning) {
+          workerRef.current?.postMessage({ command: 'stop' });
+          playNotificationSound('pause');
+        } else {
+          const isInitialWorkStart =
+            timerState.currentPhase === 'work' &&
+            timerState.currentCycle === 1 &&
+            timerState.currentSet === 1 &&
+            timerState.currentTime === settings.workTime * 60 + settings.workSeconds;
+          playNotificationSound(isInitialWorkStart ? 'startup' : 'unpause');
+          setTimeout(() => {
+            workerRef.current?.postMessage({ command: 'start', settings }); // Передаємо settings при старті
+          }, 500);
+        }
     }
   };
 
   const resetTimer = useCallback(() => {
-    setCurrentTime(settings.workTime * 60 + settings.workSeconds);
-    setCurrentPhase('work');
-    setCurrentCycle(1);
-    setCurrentSet(1);
-    setIsRunning(false);
-    setIsFinished(false);
-    setTotalElapsedSeconds(0);
+    workerRef.current?.postMessage({ command: 'reset', settings });
     stopAndResetAllSounds();
-    clearInterval(intervalRef.current!);
-    clearTimeout(timeoutRef.current!);
   }, [settings, stopAndResetAllSounds]);
 
   const getTotalProgress = () => {
     if (initialTotalSessionTime === 0) return 0;
-    return Math.min(100, (totalElapsedSeconds / initialTotalSessionTime) * 100);
+    return Math.min(100, (timerState.totalElapsedSeconds / initialTotalSessionTime) * 100);
   };
 
   return {
-    currentTime,
-    currentPhase,
-    currentCycle,
-    currentSet,
-    isRunning,
-    isFinished,
-    totalElapsedSeconds,
+    ...timerState,
     toggleTimer,
     resetTimer,
     getTotalProgress,

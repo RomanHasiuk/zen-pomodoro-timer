@@ -16,14 +16,14 @@ export const useSettings = () => {
   const [settings, setSettings] = useState<PomodoroSettings>(() => {
     const savedSettings = localStorage.getItem('pomodoroSettings');
     const defaults: PomodoroSettings = {
-      workTime: 0,
-      workSeconds: 10,
-      restTime: 0,
-      restSeconds: 10,
-      workCycles: 2,
-      longBreakTime: 0,
-      longBreakSeconds: 10,
-      totalSets: 1,
+      workTime: 45,
+      workSeconds: 0,
+      restTime: 5,
+      restSeconds: 0,
+      workCycles: 4,
+      longBreakTime: 30,
+      longBreakSeconds: 0,
+      totalSets: 2,
       volume: 75,
     };
 
